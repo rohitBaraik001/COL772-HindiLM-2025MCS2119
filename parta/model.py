@@ -15,6 +15,16 @@ class LanguageModel(nn.Module):
         """
         self.config = config
         super().__init__()
+        
+        #extract required config value
+        vocab_size = config["vocab_size"]
+        d_model = config["d_model"]
+        
+        #token embedding layer
+        self.embedding = nn.Embedding(vocab_size,d_model)
+
+        # output projection layer (maps hidden state -> vocab logits)
+        self.output_projection = nn.Linear(d_model, vocab_size, bias = False)
 
     def set_weights(self, weights: Dict[str, Any]):
         """
@@ -39,7 +49,12 @@ class LanguageModel(nn.Module):
             - A tensor of shape (batch_size, sequence_len, vocab_size) containing the logits for each token in the vocabulary.
             Logits are the raw, unnormalized scores output by the model, which can be converted to probabilities using a softmax function.
         """
-        raise NotImplementedError("Implement forward as described in assignment document")
+        #convert token-ids to embeddings
+        x = self.embedding(input_ids)
+
+        #project hidden state to vocabulary state
+        logits = self.output_projection(x)
+        return logits
 
 
 
