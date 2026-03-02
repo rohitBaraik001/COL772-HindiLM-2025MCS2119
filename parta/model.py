@@ -19,12 +19,33 @@ class LanguageModel(nn.Module):
         #extract required config value
         vocab_size = config["vocab_size"]
         d_model = config["d_model"]
+        max_seq_len = config["max_seq_len"]
         
         #token embedding layer
         self.embedding = nn.Embedding(vocab_size,d_model)
 
         # output projection layer (maps hidden state -> vocab logits)
         self.output_projection = nn.Linear(d_model, vocab_size, bias = False)
+        
+        #Positional encoding (sinusoidal)
+        pe = self._create_positional_encoding(max_seq_len, d_model)
+
+        # Register as buffer (not trainable, but moves with model)
+        self.register_buffer("positional_encoding", pe)
+    
+    def _create_positional_encoding(self, max_seq_len, d_model):
+        pe = torch.zeros(max_seq_len, d_model)
+
+        position = torch.arange(0, max_seq_len).unsqueeze(1)
+
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2) * (-torch.log(torch.tensor(10000.0)) / d_model)
+        )
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        return pe
 
     def set_weights(self, weights: Dict[str, Any]):
         """
@@ -51,6 +72,11 @@ class LanguageModel(nn.Module):
         """
         #convert token-ids to embeddings
         x = self.embedding(input_ids)
+
+        seq_len = input_ids.size(1)
+
+        # Add positional encoding
+        x = x + self.positional_encoding[:seq_len, :].unsqueeze(0)
 
         #project hidden state to vocabulary state
         logits = self.output_projection(x)
