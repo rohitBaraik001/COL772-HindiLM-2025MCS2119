@@ -2,6 +2,65 @@ import torch
 import torch.nn as nn
 from typing import Any, Dict, List
 
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+
+        assert d_model % num_heads == 0
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+
+        self.q_proj = nn.Linear(d_model, d_model, bias=False)
+        self.k_proj = nn.Linear(d_model, d_model, bias=False)
+        self.v_proj = nn.Linear(d_model, d_model, bias=False)
+
+        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x, attention_mask=None):
+        # x shape: (B, T, d_model)
+        B, T, D = x.size()
+
+        #Generate Q, K, V
+        Q = self.q_proj(x)
+        K = self.k_proj(x)
+        V = self.v_proj(x)
+
+        #Split into heads
+        Q = Q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Now shapes:
+        # (B, num_heads, T, head_dim)
+
+        #Compute attention scores
+        scores = Q @ K.transpose(-2, -1)
+        scores = scores / (self.head_dim ** 0.5)
+
+        #Apply attention mask (if given)
+        if attention_mask is not None:
+            # attention_mask shape should be (B, T)
+            # We expand it to match attention score dimensions
+            mask = attention_mask.unsqueeze(1).unsqueeze(2)
+            # mask shape: (B, 1, 1, T)
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+
+        #Softmax
+        attention_weights = torch.softmax(scores, dim=-1)
+
+        #Weighted sum
+        output = attention_weights @ V
+        #(B, num_heads, T, head_dim)
+
+        #Combine heads
+        output = output.transpose(1, 2).contiguous()
+        output = output.view(B, T, D)
+
+        #Final projection
+        return self.out_proj(output)
+
 
 class LanguageModel(nn.Module):
     """
@@ -13,13 +72,14 @@ class LanguageModel(nn.Module):
         """
         Build the LanguageModel based on the config.
         """
-        self.config = config
         super().__init__()
+        self.config = config
         
         #extract required config value
         vocab_size = config["vocab_size"]
         d_model = config["d_model"]
         max_seq_len = config["max_seq_len"]
+        num_heads = config["num_heads"]
         
         #token embedding layer
         self.embedding = nn.Embedding(vocab_size,d_model)
@@ -32,6 +92,9 @@ class LanguageModel(nn.Module):
 
         # Register as buffer (not trainable, but moves with model)
         self.register_buffer("positional_encoding", pe)
+
+        # Multi-Head Attention
+        self.attention = MultiHeadAttention(d_model, num_heads)
     
     def _create_positional_encoding(self, max_seq_len, d_model):
         pe = torch.zeros(max_seq_len, d_model)
@@ -77,6 +140,9 @@ class LanguageModel(nn.Module):
 
         # Add positional encoding
         x = x + self.positional_encoding[:seq_len, :].unsqueeze(0)
+
+        # Multi-head attention
+        x = self.attention(x, attention_mask)
 
         #project hidden state to vocabulary state
         logits = self.output_projection(x)
