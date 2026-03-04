@@ -2,6 +2,39 @@ import torch
 import torch.nn as nn
 from typing import Any, Dict, List
 
+class FeedForward(nn.Module):
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+
+        self.linear1 = nn.Linear(d_model, d_ff)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(d_ff, d_model)
+
+    def forward(self, x):
+        return self.linear2(self.relu(self.linear1(x)))
+    
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model, num_heads, d_ff):
+        super().__init__()
+
+        self.attention = MultiHeadAttention(d_model, num_heads)
+        self.norm1 = nn.LayerNorm(d_model)
+
+        self.ffn = FeedForward(d_model, d_ff)
+        self.norm2 = nn.LayerNorm(d_model)
+
+    def forward(self, x, attention_mask):
+
+        # Attention + residual
+        attn_out = self.attention(x, attention_mask)
+        x = self.norm1(x + attn_out)
+
+        # Feed-forward + residual
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+
+        return x
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads):
         super().__init__()
@@ -94,7 +127,8 @@ class LanguageModel(nn.Module):
         self.register_buffer("positional_encoding", pe)
 
         # Multi-Head Attention
-        self.attention = MultiHeadAttention(d_model, num_heads)
+        d_ff = 4 * d_model
+        self.transformer_block = TransformerBlock(d_model, num_heads, d_ff)
     
     def _create_positional_encoding(self, max_seq_len, d_model):
         pe = torch.zeros(max_seq_len, d_model)
@@ -142,7 +176,7 @@ class LanguageModel(nn.Module):
         x = x + self.positional_encoding[:seq_len, :].unsqueeze(0)
 
         # Multi-head attention
-        x = self.attention(x, attention_mask)
+        x = self.transformer_block(x, attention_mask)
 
         #project hidden state to vocabulary state
         logits = self.output_projection(x)
