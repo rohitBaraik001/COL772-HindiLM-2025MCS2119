@@ -72,6 +72,12 @@ class MultiHeadAttention(nn.Module):
         scores = Q @ K.transpose(-2, -1)
         scores = scores / (self.head_dim ** 0.5)
 
+        # Causal mask
+        causal_mask = torch.tril(torch.ones(T, T, device=x.device))
+        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
+
+        scores = scores.masked_fill(causal_mask == 0, float("-inf"))
+
         #Apply attention mask (if given)
         if attention_mask is not None:
             # attention_mask shape should be (B, T)
