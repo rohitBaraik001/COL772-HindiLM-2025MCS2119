@@ -66,18 +66,12 @@ class MultiHeadAttention(nn.Module):
         V = V.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Now shapes:
-        # (B, num_heads, T, head_dim)
+        #(B, num_heads, T, head_dim)
 
         #Compute attention scores
         scores = Q @ K.transpose(-2, -1)
         scores = scores / (self.head_dim ** 0.5)
-
-        # Causal mask
-        causal_mask = torch.tril(torch.ones(T, T, device=x.device))
-        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
-
-        scores = scores.masked_fill(causal_mask == 0, float("-inf"))
-
+        
         #Apply attention mask (if given)
         if attention_mask is not None:
             # attention_mask shape should be (B, T)
@@ -85,6 +79,11 @@ class MultiHeadAttention(nn.Module):
             mask = attention_mask.unsqueeze(1).unsqueeze(2)
             # mask shape: (B, 1, 1, T)
             scores = scores.masked_fill(mask == 0, float("-inf"))
+        
+        # Causal mask
+        causal_mask = torch.tril(torch.ones(T, T, device=x.device))
+        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
+        scores = scores.masked_fill(causal_mask == 0, float("-inf"))
 
         #Softmax
         attention_weights = torch.softmax(scores, dim=-1)
@@ -113,12 +112,18 @@ class LanguageModel(nn.Module):
         """
         super().__init__()
         self.config = config
-        
+        #print(config)
         #extract required config value
         vocab_size = config["vocab_size"]
         d_model = config["d_model"]
-        max_seq_len = config["max_seq_len"]
-        num_heads = config["num_heads"]
+        num_heads = config["n_heads"]
+        max_seq_len = 2048
+
+        d_ff = 4 * d_model
+        self.blocks = nn.ModuleList(
+            [TransformerBlock(d_model, num_heads, d_ff) for _ in range(config["n_layers"])]
+        )
+        
         
         #token embedding layer
         self.embedding = nn.Embedding(vocab_size,d_model)
@@ -132,14 +137,11 @@ class LanguageModel(nn.Module):
         # Register as buffer (not trainable, but moves with model)
         self.register_buffer("positional_encoding", pe)
 
-        # Multi-Head Attention
-        d_ff = 4 * d_model
-        self.transformer_block = TransformerBlock(d_model, num_heads, d_ff)
     
     def _create_positional_encoding(self, max_seq_len, d_model):
-        pe = torch.zeros(max_seq_len, d_model)
+        pe = torch.zeros(max_seq_len, d_model, dtype=torch.float32)
 
-        position = torch.arange(0, max_seq_len).unsqueeze(1)
+        position = torch.arange(0, max_seq_len, dtype=torch.float32).unsqueeze(1)
 
         div_term = torch.exp(
             torch.arange(0, d_model, 2) * (-torch.log(torch.tensor(10000.0)) / d_model)
@@ -159,7 +161,75 @@ class LanguageModel(nn.Module):
         Parameters:
             - weights: A dictionary containing the model's weights. The structure of this dictionary will depend on how you design your model.
         """
-        raise NotImplementedError("Implement set_weights as described in assignment document")
+        #print(weights.keys())
+        with torch.no_grad():
+            # Embedding
+            self.embedding.weight.copy_(torch.as_tensor(weights["W_vocab"]).T)
+
+            # output projection
+            self.output_projection.weight.copy_(torch.as_tensor(weights["W_devocab"]).T)
+            # transformer layer
+            num_heads = self.config["n_heads"]
+            for i, block in enumerate(self.blocks):
+                layer = i + 1
+            # multi-head Q K V
+                q_weights = []
+                k_weights = []
+                v_weights = []
+
+                for h in range(num_heads):
+                    head = h + 1
+                    q_weights.append(torch.as_tensor(weights[f"W_{layer}_Q_{head}"]))
+                    k_weights.append(torch.as_tensor(weights[f"W_{layer}_K_{head}"]))
+                    v_weights.append(torch.as_tensor(weights[f"W_{layer}_V_{head}"]))
+                
+                q_matrix = torch.cat(q_weights, dim=0).T
+                k_matrix = torch.cat(k_weights, dim=0).T
+                v_matrix = torch.cat(v_weights, dim=0).T
+
+                block.attention.q_proj.weight.copy_(q_matrix)
+                block.attention.k_proj.weight.copy_(k_matrix)
+                block.attention.v_proj.weight.copy_(v_matrix)
+
+                # Attention output projection
+                block.attention.out_proj.weight.copy_(
+                    torch.as_tensor(weights[f"W_{layer}_O"])
+                )
+
+                # Feedforward
+                block.ffn.linear1.weight.copy_(
+                    torch.as_tensor(weights[f"W_{layer}_up"]).T
+                )
+
+                block.ffn.linear1.bias.copy_(
+                    torch.as_tensor(weights[f"b_{layer}_up"])
+                )
+
+                block.ffn.linear2.weight.copy_(
+                    torch.as_tensor(weights[f"W_{layer}_down"]).T
+                )
+
+                block.ffn.linear2.bias.copy_(
+                    torch.as_tensor(weights[f"b_{layer}_down"])
+                )
+
+                # LayerNorm 1
+                block.norm1.weight.copy_(
+                    torch.as_tensor(weights[f"gamma_{layer}_1"])
+                )
+
+                block.norm1.bias.copy_(
+                    torch.as_tensor(weights[f"beta_{layer}_1"])
+                )
+
+                # LayerNorm 2
+                block.norm2.weight.copy_(
+                    torch.as_tensor(weights[f"gamma_{layer}_2"])
+                )
+
+                block.norm2.bias.copy_(
+                    torch.as_tensor(weights[f"beta_{layer}_2"])
+                )
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """
@@ -179,10 +249,11 @@ class LanguageModel(nn.Module):
         seq_len = input_ids.size(1)
 
         # Add positional encoding
-        x = x + self.positional_encoding[:seq_len, :].unsqueeze(0)
+        pos = self.positional_encoding[:seq_len, :]
+        x = x + pos.unsqueeze(0)
 
-        # Multi-head attention
-        x = self.transformer_block(x, attention_mask)
+        for block in self.blocks:
+            x = block(x, attention_mask)
 
         #project hidden state to vocabulary state
         logits = self.output_projection(x)
