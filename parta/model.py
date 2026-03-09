@@ -7,36 +7,36 @@ class FeedForward(nn.Module):
         super().__init__()
 
         self.linear1 = nn.Linear(d_model, d_ff)
-        self.relu = nn.ReLU()
+        self.gelu = nn.GELU()
         self.linear2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x):
-        return self.linear2(self.relu(self.linear1(x)))
+        return self.linear2(self.gelu(self.linear1(x)))
     
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff):
+    def __init__(self, d_model, num_heads, d_ff, mode = "standard", tau=1.0):
         super().__init__()
 
-        self.attention = MultiHeadAttention(d_model, num_heads)
+        self.attention = MultiHeadAttention(d_model, num_heads, mode=mode, tau=tau)
         self.norm1 = nn.LayerNorm(d_model)
 
         self.ffn = FeedForward(d_model, d_ff)
         self.norm2 = nn.LayerNorm(d_model)
 
     def forward(self, x, attention_mask):
-
+        # Implementing feed-forward logic with batching.
         # Attention + residual
-        attn_out = self.attention(x, attention_mask)
-        x = self.norm1(x + attn_out)
+        attn_out = self.attention(self.norm1(x), attention_mask)
+        x = x + attn_out
 
         # Feed-forward + residual
-        ffn_out = self.ffn(x)
-        x = self.norm2(x + ffn_out)
+        ffn_out = self.ffn(self.norm2(x))
+        x = x + ffn_out
 
         return x
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads):
+    def __init__(self, d_model, num_heads, mode="standard", tau=1.0):
         super().__init__()
 
         assert d_model % num_heads == 0
@@ -44,34 +44,38 @@ class MultiHeadAttention(nn.Module):
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
+        self.mode = mode
+        self.tau = tau
 
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
         self.k_proj = nn.Linear(d_model, d_model, bias=False)
         self.v_proj = nn.Linear(d_model, d_model, bias=False)
 
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
+    
+    def safe_softmax(self, tensor, dim):
+        return torch.softmax(tensor, dim=dim)
 
     def forward(self, x, attention_mask=None):
         # x shape: (B, T, d_model)
         B, T, D = x.size()
 
         #Generate Q, K, V
-        Q = self.q_proj(x)
-        K = self.k_proj(x)
-        V = self.v_proj(x)
+        q_prime = self.q_proj(x)
+        k_prime = self.k_proj(x)
+        v_prime = self.v_proj(x)
 
         #Split into heads
-        Q = Q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        K = K.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        V = V.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
-        # Now shapes:
-        #(B, num_heads, T, head_dim)
+        Q = q_prime.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        K = k_prime.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        V = v_prime.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
         #Compute attention scores
         scores = Q @ K.transpose(-2, -1)
         scores = scores / (self.head_dim ** 0.5)
-        
+
+        if self.mode == "tanh-clipped":
+            scores = self.tau*torch.tanh(scores)
         #Apply attention mask (if given)
         if attention_mask is not None:
             # attention_mask shape should be (B, T)
@@ -85,8 +89,8 @@ class MultiHeadAttention(nn.Module):
         causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
         scores = scores.masked_fill(causal_mask == 0, float("-inf"))
 
-        #Softmax
-        attention_weights = torch.softmax(scores, dim=-1)
+        #Softmax via safe softmax
+        attention_weights = self.safe_softmax(scores, dim=-1)
 
         #Weighted sum
         output = attention_weights @ V
@@ -120,11 +124,14 @@ class LanguageModel(nn.Module):
         max_seq_len = 2048
 
         d_ff = 4 * d_model
+        mode = config.get("mode", "standard")
+        tau = config.get("tau", 1.0)
         self.blocks = nn.ModuleList(
-            [TransformerBlock(d_model, num_heads, d_ff) for _ in range(config["n_layers"])]
+            [TransformerBlock(d_model, num_heads, d_ff, mode=mode, tau=tau) for _ in range(config["n_layers"])]
         )
         
-        
+        # Final layer norm
+        self.final_norm = nn.LayerNorm(d_model)
         #token embedding layer
         self.embedding = nn.Embedding(vocab_size,d_model)
 
@@ -187,13 +194,13 @@ class LanguageModel(nn.Module):
                 k_matrix = torch.cat(k_weights, dim=0).T
                 v_matrix = torch.cat(v_weights, dim=0).T
 
-                block.attention.q_proj.weight.copy_(q_matrix)
-                block.attention.k_proj.weight.copy_(k_matrix)
-                block.attention.v_proj.weight.copy_(v_matrix)
+                block.attention.q_proj.weight.copy_(q_matrix).T
+                block.attention.k_proj.weight.copy_(k_matrix).T
+                block.attention.v_proj.weight.copy_(v_matrix).T
 
                 # Attention output projection
                 block.attention.out_proj.weight.copy_(
-                    torch.as_tensor(weights[f"W_{layer}_O"])
+                    torch.as_tensor(weights[f"W_{layer}_O"]).T
                 )
 
                 # Feedforward
@@ -230,6 +237,10 @@ class LanguageModel(nn.Module):
                 block.norm2.bias.copy_(
                     torch.as_tensor(weights[f"beta_{layer}_2"])
                 )
+            
+            if "gamma_final" in weights:
+                self.final_norm.weight.copy_(torch.as_tensor(weights["gamma_final"]))
+                self.final_norm.bias.copy_(torch.as_tensor(weights["beta_final"]))
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """
@@ -256,6 +267,7 @@ class LanguageModel(nn.Module):
             x = block(x, attention_mask)
 
         #project hidden state to vocabulary state
+        x = self.final_norm(x)
         logits = self.output_projection(x)
         return logits
 
