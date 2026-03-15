@@ -102,19 +102,70 @@ class BPETokenizer:
     
     
     def encode(self, text):
-        raise NotImplementedError("Encoding method not implemented yet.")
+        # Begin encoding the user given input text.
+        output_tokens = []
+        words = text.strip().split()
+        
+        for word in words:
+            tokens = list(word)
+            
+            #apply merges in learned order
+            for pair in self.merges:
+                new_token = pair[0] + pair[1]
+                #check if pair exist in current tokens
+                i = 0
+                pair_found = False
+                while i < len(tokens)-1:
+                    if tokens[i] == pair[0] and tokens[i+1] == pair[1]:
+                        pair_found = True
+                        break
+                    else:
+                        i = i + 1
+                if pair_found:
+                    tokens = self._atomic_merge_step(tokens, pair, new_token)
+            
+            #convert tokens to ids
+            for token in tokens:
+                if token in self.token_to_id:
+                    output_tokens.append(self.token_to_id[token])
+                else:
+                    output_tokens.append(self.get_unk_id())
+        return output_tokens
+
 
     def decode(self, token_ids):
-        raise NotImplementedError("Decoding method not implemented yet.")
+        print("Decode not implemented yet")
 
     def save(self, filepath):
-        raise NotImplementedError("Save method not implemented yet.")
+        print("save not implemented yet")
 
     def load(self, filepath):
-        raise NotImplementedError("Load method not implemented yet.")
+        print("Load method not implemented yet.")
     
     def get_vocab_size(self):
         return len(self.token_to_id)
     
     def get_unk_id(self):
         return self.token_to_id.get(self.unk_token)
+
+
+#1.test 
+
+# tokenizer = BPETokenizer(vocab_size=30)
+
+# corpus = [
+#     "lowest",
+#     "lower",
+#     "newest",
+#     "widest"
+# ]
+
+# tokenizer.train(corpus)
+
+# print("VOCAB:", tokenizer.vocab)
+# print("MERGES:", tokenizer.merges)
+# print(tokenizer.encode("lowest"))
+# print(tokenizer.encode("lower"))
+# print(tokenizer.encode("newest"))
+# print(tokenizer.encode("widest"))
+# print(tokenizer.encode("rohit"))
