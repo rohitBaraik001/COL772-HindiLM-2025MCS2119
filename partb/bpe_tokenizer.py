@@ -110,7 +110,11 @@ class BPETokenizer:
     def encode(self, text):
         # Begin encoding the user given input text.
         output_tokens = []
-        tokens = list(text)
+        words = text.split()
+        tokens = []
+        for i, word in enumerate(words):
+            token = (" " + word) if i > 0 else word
+            tokens.extend(list(token))
         
             
         #apply merges in learned order
