@@ -1,5 +1,5 @@
 class BPETokenizer:
-    def __init__(self, vocab_size, special_tokens=None):
+    def __init__(self, vocab_size=None, special_tokens=None):
         self.vocab_size = vocab_size
 
         if special_tokens is None:
@@ -46,6 +46,9 @@ class BPETokenizer:
         for word in word_freq:
             for char in word:
                 self.vocab.add(char)
+        
+        # add space token
+        self.vocab.add(" ")
 
         # add special tokens to vocab
         for token in self.special_tokens:
@@ -111,37 +114,25 @@ class BPETokenizer:
     def encode(self, text):
         # Begin encoding the user given input text.
         output_tokens = []
-        words = text.strip().split()
+        tokens = list(text)
         
-        for word in words:
-            tokens = list(word)
             
-            #apply merges in learned order
-            for pair in self.merges:
-                new_token = pair[0] + pair[1]
-                #check if pair exist in current tokens
-                i = 0
-                pair_found = False
-                while i < len(tokens)-1:
-                    if tokens[i] == pair[0] and tokens[i+1] == pair[1]:
-                        pair_found = True
-                        break
-                    else:
-                        i = i + 1
-                if pair_found:
-                    tokens = self._atomic_merge_step(tokens, pair, new_token)
+        #apply merges in learned order
+        for pair in self.merges:
+            new_token = pair[0] + pair[1]
+            tokens = self._atomic_merge_step(tokens, pair, new_token)
             
-            #convert tokens to ids
-            for token in tokens:
-                if token in self.token_to_id:
-                    output_tokens.append(self.token_to_id[token])
-                else:
-                    output_tokens.append(self.get_unk_id())
+        #convert tokens to ids
+        for token in tokens:
+            if token in self.token_to_id:
+                output_tokens.append(self.token_to_id[token])
+            else:
+                output_tokens.append(self.get_unk_id())
         return output_tokens
 
 
     def decode(self, token_ids):
-        # Begin decoding the user given input text
+        # Begin decoding the user given input text.
         tokens = []
         for idx in token_ids:
             token = self.id_to_token.get(idx, self.unk_token)
@@ -150,38 +141,39 @@ class BPETokenizer:
         return "".join(tokens)
 
     def save(self, filepath):
-        print("save not implemented yet")
+        import json 
+        import os
+
+        os.makedirs(filepath, exist_ok=True)
+        data = {
+            "vocab": list(self.vocab),
+            "token_to_id": self.token_to_id,
+            "id_to_token": self.id_to_token,
+            "merges": self.merges,
+            "special_tokens": self.special_tokens
+        }
+
+        with open(os.path.join(filepath, "tokenizer.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load(self, filepath):
-        print("Load method not implemented yet.")
+        import json
+        import os
+
+        with open(os.path.join(filepath, "tokenizer.json"), "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        self.vocab = set(data["vocab"])
+        self.token_to_id = data["token_to_id"]
+
+        # JSON converts keys to strings, so convert them back to int
+        self.id_to_token = {int(k): v for k, v in data["id_to_token"].items()}
+        self.merges = [tuple(pair) for pair in data["merges"]]
+        self.special_tokens = data["special_tokens"]
+        
     
     def get_vocab_size(self):
         return len(self.token_to_id)
     
     def get_unk_id(self):
         return self.token_to_id.get(self.unk_token)
-
-
-#1.test 
-
-# tokenizer = BPETokenizer(vocab_size=30)
-
-# corpus = [
-#     "lowest",
-#     "lower",
-#     "newest",
-#     "widest"
-# ]
-
-# tokenizer.train(corpus)
-
-# print("VOCAB:", tokenizer.vocab)
-# print("MERGES:", tokenizer.merges)
-# print(tokenizer.encode("lower"))
-# print(tokenizer.encode("newest"))
-# print(tokenizer.encode("widest"))
-# print(tokenizer.encode("rohit"))
-# encoded = tokenizer.encode("lowest is the widest")
-# print(encoded)
-# decoded = tokenizer.decode(encoded)
-# print(decoded)
