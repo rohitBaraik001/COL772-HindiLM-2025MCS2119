@@ -51,11 +51,18 @@ class BPETokenizer:
         for token in self.special_tokens:
             self.vocab.add(token)
         
-        #initializing the token ids for base vocabulary
-        for token in sorted(self.vocab):
+        # assign ids to special tokens first
+        for token in self.special_tokens:
             idx = len(self.token_to_id)
             self.token_to_id[token] = idx
             self.id_to_token[idx] = token
+        
+        #initializing the token ids for base vocabulary
+        for token in sorted(self.vocab):
+            if token not in self.token_to_id:
+                idx = len(self.token_to_id)
+                self.token_to_id[token] = idx
+                self.id_to_token[idx] = token
         
         # iterative vocabulary construction
         while(len(self.vocab)<self.vocab_size):
@@ -134,7 +141,13 @@ class BPETokenizer:
 
 
     def decode(self, token_ids):
-        print("Decode not implemented yet")
+        # Begin decoding the user given input text
+        tokens = []
+        for idx in token_ids:
+            token = self.id_to_token.get(idx, self.unk_token)
+            if token!='[PAD]': #ignore the padding
+                tokens.append(token)
+        return "".join(tokens)
 
     def save(self, filepath):
         print("save not implemented yet")
@@ -164,8 +177,11 @@ class BPETokenizer:
 
 # print("VOCAB:", tokenizer.vocab)
 # print("MERGES:", tokenizer.merges)
-# print(tokenizer.encode("lowest"))
 # print(tokenizer.encode("lower"))
 # print(tokenizer.encode("newest"))
 # print(tokenizer.encode("widest"))
 # print(tokenizer.encode("rohit"))
+# encoded = tokenizer.encode("lowest is the widest")
+# print(encoded)
+# decoded = tokenizer.decode(encoded)
+# print(decoded)
