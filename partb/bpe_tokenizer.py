@@ -1,9 +1,11 @@
+from collections import defaultdict
+
 class BPETokenizer:
     def __init__(self, vocab_size=None, special_tokens=None):
         self.vocab_size = vocab_size
 
         if special_tokens is None:
-            special_tokens = ["[PAD]","[UNK]"]
+            special_tokens = ["[PAD]", "[UNK]", "[SOS]", "[EOS]"]
         
         self.special_tokens = special_tokens
 
@@ -21,34 +23,33 @@ class BPETokenizer:
     def _atomic_merge_step(self, word_list, pair, new_token):
         merged = []
         i = 0
-        while i < len(word_list):
-            if i < len(word_list)-1 and word_list[i]==pair[0] and word_list[i+1]==pair[1]:
+        a, b = pair
+        n = len(word_list)
+        while i < n:
+            if i < n-1 and word_list[i]==a and word_list[i+1]==b:
                 merged.append(new_token)
-                i = i + 2
+                i += 2
             else:
                 merged.append(word_list[i])
-                i = i + 1
-        return merged
+                i += 1
+        return tuple(merged)
 
 
     def train(self, corpus):
-        word_freq = {}
+        word_freq = defaultdict(int)
         #Build word frequency dictionary using characters tokens
         for sentence in corpus:
-            words = sentence.strip().split()
-            for word in words:
-                chars = tuple(list(word))
-                if chars not in word_freq:
-                    word_freq[chars] = 0
-                word_freq[chars]+=1
+            words = sentence.split()
+            for i, word in enumerate(words):
+                token = (" " + word) if i > 0 else word
+                chars = tuple(token)
+                word_freq[chars] += 1
         
         # character vocabulary
         for word in word_freq:
             for char in word:
                 self.vocab.add(char)
         
-        # add space token
-        self.vocab.add(" ")
 
         # add special tokens to vocab
         for token in self.special_tokens:
@@ -67,38 +68,33 @@ class BPETokenizer:
                 self.token_to_id[token] = idx
                 self.id_to_token[idx] = token
         
+        num_merges = self.vocab_size - len(self.token_to_id)
         # iterative vocabulary construction
-        while(len(self.vocab)<self.vocab_size):
-            digram_stats = {}
+        for _ in range(max(0,num_merges)):
+            digram_stats = defaultdict(int)
 
             #count pair frequency
-            for word, freq in word_freq.items():
-                tokens = list(word)
-                for i in range(len(tokens)-1):
-                    pair = (tokens[i],tokens[i+1])
-                    digram_stats[pair] = digram_stats.get(pair,0) + freq
+            for tokens, freq in word_freq.items():
+                for a, b in zip(tokens, tokens[1:]):
+                    digram_stats[(a,b)]+=freq
             
             #stop if no more pair exists
             if not digram_stats:
                 break
 
             #select most frequent pair
-            best_pair = max(digram_stats, key=digram_stats.get)
+            best_pair = max(digram_stats.items(), key=lambda x: (x[1], x[0]))[0]
             new_token = best_pair[0] + best_pair[1]
 
             # add new token to vocabulary
             self.vocab.add(new_token)
 
             #store merge rule
-            self.merges.append(best_pair)
+            self.merges.append((best_pair, new_token))
             #Apply merge to all words in corpus
-            new_word_freq = {}
-            for word, freq in word_freq.items():
-                tokens = list(word)
+            new_word_freq = defaultdict(int)
+            for tokens, freq in word_freq.items():
                 merged_tokens = self._atomic_merge_step(tokens, best_pair, new_token)
-                merged_tokens = tuple(merged_tokens)
-                if merged_tokens not in new_word_freq:
-                    new_word_freq[merged_tokens] = 0
                 new_word_freq[merged_tokens]+=freq
             word_freq = new_word_freq
         
@@ -118,8 +114,7 @@ class BPETokenizer:
         
             
         #apply merges in learned order
-        for pair in self.merges:
-            new_token = pair[0] + pair[1]
+        for pair, new_token in self.merges:
             tokens = self._atomic_merge_step(tokens, pair, new_token)
             
         #convert tokens to ids
@@ -136,7 +131,7 @@ class BPETokenizer:
         tokens = []
         for idx in token_ids:
             token = self.id_to_token.get(idx, self.unk_token)
-            if token!='[PAD]': #ignore the padding
+            if token not in self.special_tokens: #ignore the padding
                 tokens.append(token)
         return "".join(tokens)
 
@@ -176,4 +171,4 @@ class BPETokenizer:
         return len(self.token_to_id)
     
     def get_unk_id(self):
-        return self.token_to_id.get(self.unk_token)
+        return self.token_to_id[self.unk_token]
