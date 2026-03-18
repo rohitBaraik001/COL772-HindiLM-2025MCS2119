@@ -5,15 +5,24 @@ from parta.model import LanguageModel
 
 # You can also create additional files in this directory and import them here if needed.
 # For example, the line below import a dummy function from utils.py file.
-from .utils import dummy_function  # Replace with actual utility functions as needed
-
+from .utils import dummy_function  
+# Replace with actual utility functions as needed
 # You can structure your code as you see fit as long as the CLI works as specified.
 # Finally, treat this as your FINAL MODEL TRAINING SCRIPT. Do not perform hyperparameter tuning here.
 # You can create separate scripts for hyperparameter tuning if needed.
+import numpy as np
+import random
+import torch 
+import torch.nn.functional as F
+
+def set_seeds_for_training(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def main(args):
     raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
-
 
 if __name__ == '__main__':
     import argparse
