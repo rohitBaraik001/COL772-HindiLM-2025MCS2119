@@ -33,6 +33,13 @@ def compute_loss_for_language_modeling(logits, labels, attention_mask):
     loss = loss * mask.reshape(-1)
     return loss.sum() / (mask.sum() + 1e-8)
 
+# reads entire file into a list (each line = one element)
+def load_data(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.readlines()
+
+
+
 def main(args):
     raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
 
