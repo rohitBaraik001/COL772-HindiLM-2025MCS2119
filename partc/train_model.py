@@ -48,6 +48,13 @@ def pad_sequence(sequences, pad_id=0):
         masks.append([1]*len(seq) + [0]*pad_len)
     return torch.tensor(padded), torch.tensor(masks)
 
+def create_batches(data, batch_size, shuffle=False):
+    indices = list(range(len(data)))
+    if shuffle:
+        random.shuffle(indices)
+    for i in range(0, len(data), batch_size):
+        batch_indices = indices[i:i+batch_size]
+        yield [data[j] for j in batch_indices]
 
 def main(args):
     raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
