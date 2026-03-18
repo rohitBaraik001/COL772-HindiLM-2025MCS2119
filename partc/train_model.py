@@ -21,6 +21,18 @@ def set_seeds_for_training(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+def compute_loss_for_language_modeling(logits, labels, attention_mask):
+    logits = logits[:, :-1, :]
+    labels = labels[:, 1:]
+    mask = attention_mask[:, 1:]
+    loss = F.cross_entropy(
+        logits.reshape(-1, logits.size(-1)),
+        labels.reshape(-1),
+        reduction='none'
+    )
+    loss = loss * mask.reshape(-1)
+    return loss.sum() / (mask.sum() + 1e-8)
+
 def main(args):
     raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
 
