@@ -38,6 +38,15 @@ def load_data(path):
     with open(path, 'r', encoding='utf-8') as f:
         return f.readlines()
 
+def pad_sequence(sequences, pad_id=0):
+    max_len = max(len(seq) for seq in sequences)
+    padded = []
+    masks = []
+    for seq in sequences:
+        pad_len = max_len - len(seq)
+        padded.append(seq + [pad_id]*pad_len)
+        masks.append([1]*len(seq) + [0]*pad_len)
+    return torch.tensor(padded), torch.tensor(masks)
 
 
 def main(args):
