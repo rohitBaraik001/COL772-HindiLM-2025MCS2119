@@ -14,6 +14,7 @@ import numpy as np
 import random
 import torch 
 import torch.nn.functional as F
+import math
 
 def set_seeds_for_training(seed=42):
     random.seed(seed)
@@ -55,6 +56,15 @@ def create_batches(data, batch_size, shuffle=False):
     for i in range(0, len(data), batch_size):
         batch_indices = indices[i:i+batch_size]
         yield [data[j] for j in batch_indices]
+
+def get_lr_scale(step, warmup_steps, total_steps):
+    if step == 0:
+        step = 1
+    if step < warmup_steps:
+        return step/warmup_steps
+    progress = (step-warmup_steps)/max(1,total_steps-warmup_steps)
+    return max(0.1, 0.5*(1.0 + math.cos(math.pi*progress)))
+
 
 def main(args):
     raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
