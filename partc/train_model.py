@@ -133,6 +133,9 @@ def main(args):
     best_val_loss = float('inf')
     global_step   = 0
 
+    patience = 4
+    no_improve_count = 0
+
     #training loop
     for epoch in range(num_epochs):
 
@@ -188,7 +191,7 @@ def main(args):
                 input_ids = input_ids.to(accelerator_device)
                 attention_mask = attention_mask.to(accelerator_device)
 
-                with torch.cuda.amp.autocast(enabled=use_amp):
+                with torch.amp.autocast("cuda", enabled=use_amp):
                     logits = model(input_ids, attention_mask)
                     loss = compute_loss_for_language_modeling(
                         logits, input_ids, attention_mask
@@ -207,11 +210,17 @@ def main(args):
         # save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            no_improve_count = 0
             torch.save(
                 model.state_dict(),
                 os.path.join(args.output_model_path, "model.pt")
             )
             print(f"  --> Best model saved  (Val PPL: {val_ppl:.2f})")
+        else:
+            no_improve_count+=1
+            if no_improve_count>=patience:
+                print(f"\nEarly stopping triggered at epoch {epoch+1}")
+                break
 
     print(f"\nTraining complete. Best Val Loss: {best_val_loss:.4f} | Best Val PPL: {math.exp(best_val_loss):.2f}")
 
