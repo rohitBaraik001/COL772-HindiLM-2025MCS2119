@@ -15,6 +15,8 @@ import random
 import torch 
 import torch.nn.functional as F
 import math
+import os
+import json
 
 def set_seeds_for_training(seed=42):
     random.seed(seed)
@@ -39,7 +41,7 @@ def load_data(path):
     with open(path, 'r', encoding='utf-8') as f:
         return f.readlines()
 
-def pad_sequence(sequences, pad_id=0):
+def pad_sequences(sequences, pad_id=0):
     max_len = max(len(seq) for seq in sequences)
     padded = []
     masks = []
@@ -84,10 +86,138 @@ def main(args):
     #for debuggin purpose remove it later
     print(f"Train Sequence: {len(train_ids)} | Valid Sequence: {len(valid_ids)}")
     # Device
-    accelearator_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    accelerator_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = torch.cuda.is_available()
-    print(f"Using Device: {accelearator_device} ! AMP: {use_amp}")
+    print(f"Using Device: {accelerator_device} ! AMP: {use_amp}")
+    config = {
+        "d_model":    256,
+        "n_heads":    8,
+        "d_head":     32,      # 256 / 8 = 32 matches computed head_dim
+        "n_layers":   4,
+        "vocab_size": tokenizer.get_vocab_size(),
+        "mode":       "standard",
+        "tau":        1.0      
+    }
     
+    os.makedirs(args.output_model_path, exist_ok=True)
+
+    with open(os.path.join(args.output_model_path, "config.json"), "w") as f:
+        json.dump(config, f, indent=2)
+
+    model = LanguageModel(config)
+    model.to(accelerator_device)
+
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model parameters: {total_params:,}")
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr = 3e-4,
+        betas = (0.9, 0.98),
+        eps = 1e-9,
+        weight_decay = 0.01
+    )
+
+    scaler = torch.amp.GradScaler("cuda",enabled=use_amp)
+    num_epochs = 12
+    batch_size = 64
+    accumulation_steps = 1
+    warmup_steps = 200
+    num_batches_per_epoch = math.ceil(len(train_ids) / batch_size)
+    total_steps = num_epochs * num_batches_per_epoch
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: get_lr_scale(step, warmup_steps, total_steps)
+    )
+
+    best_val_loss = float('inf')
+    global_step   = 0
+
+    #training loop
+    for epoch in range(num_epochs):
+
+        #train
+        model.train()
+        train_loss  = 0.0
+        num_batches = 0
+        optimizer.zero_grad()
+
+        for batch_idx, batch_sequences in enumerate(create_batches(train_ids, batch_size, shuffle=True)):
+            input_ids, attention_mask = pad_sequences(batch_sequences)
+            input_ids = input_ids.to(accelerator_device)
+            attention_mask = attention_mask.to(accelerator_device)
+
+            with torch.amp.autocast("cuda",enabled=use_amp):
+
+                #Initiating forward pass for batch training
+                logits = model(input_ids, attention_mask)
+
+                loss = compute_loss_for_language_modeling(
+                    logits, input_ids, attention_mask
+                )
+
+                # Normalize loss so gradients are same scale regardless of
+                # how many accumulation steps we use
+                loss = loss/accumulation_steps
+
+            scaler.scale(loss).backward()
+
+            #Only update weights after accumulation_steps batches
+            if (batch_idx + 1)%accumulation_steps == 0:
+                #Must unscale before clip_grad_norm_ so clipping works correctly
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+                optimizer.zero_grad()
+                global_step+=1
+
+            train_loss+=loss.item() * accumulation_steps
+            num_batches+=1
+
+        train_loss/= num_batches
+        #validation
+        model.eval()
+        val_loss    = 0.0
+        val_batches = 0
+
+        with torch.no_grad():
+            for batch_sequences in create_batches(valid_ids, batch_size):
+                input_ids, attention_mask = pad_sequences(batch_sequences)
+                input_ids = input_ids.to(accelerator_device)
+                attention_mask = attention_mask.to(accelerator_device)
+
+                with torch.cuda.amp.autocast(enabled=use_amp):
+                    logits = model(input_ids, attention_mask)
+                    loss = compute_loss_for_language_modeling(
+                        logits, input_ids, attention_mask
+                    )
+
+                val_loss+= loss.item()
+                val_batches+= 1
+
+        val_loss/=val_batches
+
+        val_ppl = math.exp(val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+
+        print(f"Epoch {epoch+1:02d}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | LR: {current_lr:.2e}")
+
+        # save the best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(
+                model.state_dict(),
+                os.path.join(args.output_model_path, "model.pt")
+            )
+            print(f"  --> Best model saved  (Val PPL: {val_ppl:.2f})")
+
+    print(f"\nTraining complete. Best Val Loss: {best_val_loss:.4f} | Best Val PPL: {math.exp(best_val_loss):.2f}")
+
+
+
+
 
 
 if __name__ == '__main__':
