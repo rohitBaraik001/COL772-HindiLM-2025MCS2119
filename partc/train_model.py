@@ -67,7 +67,28 @@ def get_lr_scale(step, warmup_steps, total_steps):
 
 
 def main(args):
-    raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
+    #raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
+    tokenizer = BPETokenizer()
+    tokenizer.load(args.tokenizer_path)
+
+    train_text = load_data(args.train_path)
+    valid_text = load_data(args.valid_path)
+
+    MAX_SEQ_LEN = 256
+    train_ids = [tokenizer.encode(t.strip())[:MAX_SEQ_LEN] for t in train_text]
+    valid_ids = [tokenizer.encode(t.strip())[:MAX_SEQ_LEN] for t in valid_text]
+
+    train_ids = [s for s in train_ids if len(s)>1]
+    valid_ids = [s for s in valid_ids if len(s)>1]
+
+    #for debuggin purpose remove it later
+    print(f"Train Sequence: {len(train_ids)} | Valid Sequence: {len(valid_ids)}")
+    # Device
+    accelearator_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = torch.cuda.is_available()
+    print(f"Using Device: {accelearator_device} ! AMP: {use_amp}")
+    
+
 
 if __name__ == '__main__':
     import argparse
