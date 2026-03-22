@@ -56,6 +56,7 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
     
     def safe_softmax(self, tensor, dim):
+        tensor = tensor - tensor.max(dim=dim, keepdim=True).values
         return torch.softmax(tensor, dim=dim)
 
     def forward(self, x, attention_mask=None):
@@ -73,8 +74,8 @@ class MultiHeadAttention(nn.Module):
         V = v_prime.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
         #Compute attention scores
-        scores = Q @ K.transpose(-2, -1)
-        scores = scores / (self.head_dim ** 0.5)
+        scale = 1.0 / (self.head_dim ** 0.5)
+        scores = (Q @ K.transpose(-2, -1)) * scale
 
         if self.mode == "tanh-clipped":
             scores = self.tau*torch.tanh(scores)
@@ -139,6 +140,8 @@ class LanguageModel(nn.Module):
 
         # output projection layer (maps hidden state -> vocab logits)
         self.output_projection = nn.Linear(d_model, vocab_size, bias = False)
+        #Weight tying
+        self.output_projection.weight = self.embedding.weight
         
         #Positional encoding (sinusoidal)
         pe = self._create_positional_encoding(max_seq_len, d_model)
