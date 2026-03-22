@@ -140,8 +140,6 @@ class LanguageModel(nn.Module):
 
         # output projection layer (maps hidden state -> vocab logits)
         self.output_projection = nn.Linear(d_model, vocab_size, bias = False)
-        #Weight tying
-        self.output_projection.weight = self.embedding.weight
         
         #Positional encoding (sinusoidal)
         pe = self._create_positional_encoding(max_seq_len, d_model)
