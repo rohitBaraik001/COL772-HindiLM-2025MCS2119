@@ -78,7 +78,7 @@ class BPETokenizer:
                 self.id_to_token[idx] = token
         
         num_merges = self.vocab_size - len(self.token_to_id)
-        # iterative vocabulary construction
+        # Begin iterative vocabulary construction.
         for _ in range(max(0,num_merges)):
             digram_stats = defaultdict(int)
 

@@ -76,12 +76,14 @@ def main(args):
     train_text = load_data(args.train_path)
     valid_text = load_data(args.valid_path)
 
-    MAX_SEQ_LEN = 256
+    MAX_SEQ_LEN = 384
     train_ids = [tokenizer.encode(t.strip())[:MAX_SEQ_LEN] for t in train_text]
-    valid_ids = [tokenizer.encode(t.strip())[:MAX_SEQ_LEN] for t in valid_text]
+    valid_pairs = [(tokenizer.encode(t.strip())[:MAX_SEQ_LEN], t.strip()) for t in valid_text]
+    valid_pairs = [(s, t) for s, t in valid_pairs if len(s) > 1]
+    valid_ids   = [s for s, t in valid_pairs]
+    valid_texts = [t for s, t in valid_pairs]
 
-    train_ids = [s for s in train_ids if len(s)>1]
-    valid_ids = [s for s in valid_ids if len(s)>1]
+    train_ids = [s for s in train_ids if len(s) > 1]
 
     #for debuggin purpose remove it later
     print(f"Train Sequence: {len(train_ids)} | Valid Sequence: {len(valid_ids)}")
@@ -90,10 +92,10 @@ def main(args):
     use_amp = torch.cuda.is_available()
     print(f"Using Device: {accelerator_device} ! AMP: {use_amp}")
     config = {
-        "d_model":    256,
+        "d_model":    384,
         "n_heads":    8,
-        "d_head":     32,      # 256 / 8 = 32 matches computed head_dim
-        "n_layers":   4,
+        "d_head":     48,      
+        "n_layers":   6,
         "vocab_size": tokenizer.get_vocab_size(),
         "mode":       "standard",
         "tau":        1.0,
@@ -123,7 +125,7 @@ def main(args):
     num_epochs = 20
     batch_size = 64
     accumulation_steps = 1
-    warmup_steps = 200
+    warmup_steps = 1000
     num_batches_per_epoch = math.ceil(len(train_ids) / batch_size)
     total_steps = num_epochs * num_batches_per_epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -183,8 +185,11 @@ def main(args):
         train_loss/= num_batches
         #validation
         model.eval()
-        val_loss    = 0.0
+        val_loss = 0.0
         val_batches = 0
+        total_nats = 0.0
+        total_chars = 0
+        seq_idx = 0
 
         with torch.no_grad():
             for batch_sequences in create_batches(valid_ids, batch_size):
@@ -200,31 +205,47 @@ def main(args):
 
                 val_loss+= loss.item()
                 val_batches+= 1
+                # BPC: per-sequence computation
+                logits_s = logits[:, :-1, :]
+                labels_s = input_ids[:, 1:]
+                mask_s = attention_mask[:, 1:]
+                loss_per_token = F.cross_entropy(
+                    logits_s.reshape(-1, logits_s.size(-1)),
+                    labels_s.reshape(-1),
+                    reduction='none'
+                ).view(logits_s.size(0), logits_s.size(1))
+
+                for b in range(len(batch_sequences)):
+                    Ti = mask_s[b].sum().item()
+                    Li = (loss_per_token[b]*mask_s[b]).sum().item()/(Ti + 1e-8)
+                    total_nats+=Li*Ti
+                    total_chars+=len(valid_texts[seq_idx])
+                    seq_idx+=1
 
         val_loss/=val_batches
-
-        val_ppl = math.exp(val_loss)
+        
+        # Compute BPC
+        bpc = total_nats/(total_chars*math.log(2))
         current_lr = optimizer.param_groups[0]['lr']
 
-        print(f"Epoch {epoch+1:02d}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | LR: {current_lr:.2e}")
+        print(f"Epoch {epoch+1:02d}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | BPC: {bpc:.4f} | LR: {current_lr:.2e}")
 
         # save the best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if bpc < best_val_loss:
+            best_val_loss = bpc
             no_improve_count = 0
             torch.save(
                 model.state_dict(),
                 os.path.join(args.output_model_path, "model.pt")
             )
-            print(f"  --> Best model saved  (Val PPL: {val_ppl:.2f})")
+            print(f"  --> Best model saved  (BPC: {bpc:.4f})")
         else:
             no_improve_count+=1
             if no_improve_count>=patience:
                 print(f"\nEarly stopping triggered at epoch {epoch+1}")
                 break
 
-    print(f"\nTraining complete. Best Val Loss: {best_val_loss:.4f} | Best Val PPL: {math.exp(best_val_loss):.2f}")
-
+    print(f"\nTraining complete. Best BPC: {best_val_loss:.4f}")
 
 
 

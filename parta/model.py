@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Any, Dict, List
+import torch.nn.functional as F
 
 class FeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1, use_swiglu = False):
@@ -20,7 +21,7 @@ class FeedForward(nn.Module):
         if self.use_swiglu:
             x_proj = self.linear1(x)
             x1, x2 = torch.chunk(x_proj, 2, dim=-1)
-            x = x1 * torch.sigmoid(x2)
+            x = x1*F.silu(x2)
         else:
             x = self.gelu(self.linear1(x))
         return self.linear2(self.dropout(x))
@@ -205,13 +206,13 @@ class LanguageModel(nn.Module):
                     k_weights.append(torch.as_tensor(weights[f"W_{layer}_K_{head}"]))
                     v_weights.append(torch.as_tensor(weights[f"W_{layer}_V_{head}"]))
                 
-                q_matrix = torch.cat(q_weights, dim=0).T
-                k_matrix = torch.cat(k_weights, dim=0).T
-                v_matrix = torch.cat(v_weights, dim=0).T
+                q_matrix = torch.cat(q_weights, dim=0)
+                k_matrix = torch.cat(k_weights, dim=0)
+                v_matrix = torch.cat(v_weights, dim=0)
 
-                block.attention.q_proj.weight.copy_(q_matrix).T
-                block.attention.k_proj.weight.copy_(k_matrix).T
-                block.attention.v_proj.weight.copy_(v_matrix).T
+                block.attention.q_proj.weight.copy_(q_matrix.T)
+                block.attention.k_proj.weight.copy_(k_matrix.T)
+                block.attention.v_proj.weight.copy_(v_matrix.T)
 
                 # Attention output projection
                 block.attention.out_proj.weight.copy_(
