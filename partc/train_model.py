@@ -122,7 +122,7 @@ def main(args):
     )
 
     scaler = torch.amp.GradScaler("cuda",enabled=use_amp)
-    num_epochs = 20
+    num_epochs = 100
     batch_size = 64
     accumulation_steps = 1
     warmup_steps = 1000
@@ -134,7 +134,7 @@ def main(args):
     )
 
     best_val_loss = float('inf')
-    global_step   = 0
+    global_step = 0
 
     patience = 4
     no_improve_count = 0
