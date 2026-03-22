@@ -1,5 +1,12 @@
 from collections import defaultdict
 
+def normalize_text(text):
+        text = text.strip()
+        text = text.replace("\u200c", "")  # zero-width non-joiner
+        text = text.replace("\u200d", "")  # zero-width joiner
+        text = " ".join(text.split())      # normalize spaces
+        return text
+
 class BPETokenizer:
     def __init__(self, vocab_size=None, special_tokens=None):
         self.vocab_size = vocab_size
@@ -20,6 +27,7 @@ class BPETokenizer:
         #UNKNOWN token
         self.unk_token = "[UNK]"
     
+    
     def _atomic_merge_step(self, word_list, pair, new_token):
         merged = []
         i = 0
@@ -39,6 +47,7 @@ class BPETokenizer:
         word_freq = defaultdict(int)
         #Build word frequency dictionary using characters tokens
         for sentence in corpus:
+            sentence = normalize_text(sentence)
             words = sentence.split()
             for i, word in enumerate(words):
                 token = (" " + word) if i > 0 else word
@@ -110,6 +119,7 @@ class BPETokenizer:
     def encode(self, text):
         # Begin encoding the user given input text.
         output_tokens = []
+        text = normalize_text(text)
         words = text.split()
         tokens = []
         for i, word in enumerate(words):

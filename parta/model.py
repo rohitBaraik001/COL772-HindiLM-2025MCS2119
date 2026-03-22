@@ -3,7 +3,7 @@ import torch.nn as nn
 from typing import Any, Dict, List
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff, dropout=0.1, use_swiglu = True):
+    def __init__(self, d_model, d_ff, dropout=0.1, use_swiglu = False):
         super().__init__()
         self.use_swiglu = use_swiglu
         if use_swiglu:
