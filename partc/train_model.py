@@ -96,7 +96,8 @@ def main(args):
         "n_layers":   4,
         "vocab_size": tokenizer.get_vocab_size(),
         "mode":       "standard",
-        "tau":        1.0      
+        "tau":        1.0,
+        "use_swiglu": True      
     }
     
     os.makedirs(args.output_model_path, exist_ok=True)

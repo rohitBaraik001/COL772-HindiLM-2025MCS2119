@@ -3,25 +3,36 @@ import torch.nn as nn
 from typing import Any, Dict, List
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff, dropout=0.1):
+    def __init__(self, d_model, d_ff, dropout=0.1, use_swiglu = True):
         super().__init__()
-
-        self.linear1 = nn.Linear(d_model, d_ff)
-        self.gelu = nn.GELU()
+        self.use_swiglu = use_swiglu
+        if use_swiglu:
+            self.linear1 = nn.Linear(d_model, 2 * d_ff)
+            self.linear2 = nn.Linear(d_ff, d_model)
+        else:
+            self.linear1 = nn.Linear(d_model, d_ff)
+            self.gelu = nn.GELU()
+            self.linear2 = nn.Linear(d_ff, d_model)
+        
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x):
-        return self.linear2(self.dropout(self.gelu(self.linear1(x))))
+        if self.use_swiglu:
+            x_proj = self.linear1(x)
+            x1, x2 = torch.chunk(x_proj, 2, dim=-1)
+            x = x1 * torch.sigmoid(x2)
+        else:
+            x = self.gelu(self.linear1(x))
+        return self.linear2(self.dropout(x))
     
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, mode = "standard", tau=1.0, dropout = 0.1):
+    def __init__(self, d_model, num_heads, d_ff, mode = "standard", tau=1.0, dropout = 0.1, use_swiglu=False):
         super().__init__()
 
         self.attention = MultiHeadAttention(d_model, num_heads, mode=mode, tau=tau)
         self.norm1 = nn.LayerNorm(d_model)
 
-        self.ffn = FeedForward(d_model, d_ff)
+        self.ffn = FeedForward(d_model, d_ff, dropout=dropout, use_swiglu=use_swiglu)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout    = nn.Dropout(dropout)
 
@@ -129,8 +140,9 @@ class LanguageModel(nn.Module):
         d_ff = 4 * d_model
         mode = config.get("mode", "standard")
         tau = config.get("tau", 1.0)
+        use_swiglu = config.get("use_swiglu", False)
         self.blocks = nn.ModuleList(
-            [TransformerBlock(d_model, num_heads, d_ff, mode=mode, tau=tau, dropout=0.1) for _ in range(config["n_layers"])]
+            [TransformerBlock(d_model, num_heads, d_ff, mode=mode, tau=tau, dropout=0.1, use_swiglu=use_swiglu) for _ in range(config["n_layers"])]
         )
         
         # Final layer norm
