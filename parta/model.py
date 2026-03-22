@@ -3,16 +3,6 @@ import torch.nn as nn
 from typing import Any, Dict, List
 import torch.nn.functional as F
 
-class RMSNorm(nn.Module):
-    def __init__(self, d_model, eps=1e-6):
-        super().__init__()
-        self.eps = eps
-        self.scale = nn.Parameter(torch.ones(d_model))
-
-    def forward(self, x):
-        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
-        return (x / rms)*self.scale
-
 class FeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1, use_swiglu = False):
         super().__init__()
@@ -41,11 +31,11 @@ class TransformerBlock(nn.Module):
         super().__init__()
 
         self.attention = MultiHeadAttention(d_model, num_heads, mode=mode, tau=tau)
-        self.norm1 = RMSNorm(d_model)
+        self.norm1 = nn.LayerNorm(d_model)
 
         self.ffn = FeedForward(d_model, d_ff, dropout=dropout, use_swiglu=use_swiglu)
-        self.norm2 = RMSNorm(d_model)
-        self.dropout    = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, attention_mask):
         # Implementing feed-forward logic with batching.
@@ -157,7 +147,7 @@ class LanguageModel(nn.Module):
         )
         
         # Final layer norm
-        self.final_norm = RMSNorm(d_model)
+        self.final_norm = nn.LayerNorm(d_model)
         #token embedding layer
         self.embedding = nn.Embedding(vocab_size,d_model)
 
@@ -246,18 +236,25 @@ class LanguageModel(nn.Module):
                     torch.as_tensor(weights[f"b_{layer}_down"])
                 )
 
-                # RMSNorm 1
-                block.norm1.scale.copy_(
+                # LayerNorm 1
+                block.norm1.weight.copy_(
                     torch.as_tensor(weights[f"gamma_{layer}_1"])
                 )
+                block.norm1.bias.copy_(
+                    torch.as_tensor(weights[f"beta_{layer}_1"])
+                )
 
-                # RMSNorm 2
-                block.norm2.scale.copy_(
+                # LayerNorm 2
+                block.norm2.weight.copy_(
                     torch.as_tensor(weights[f"gamma_{layer}_2"])
+                )
+                block.norm2.bias.copy_(
+                    torch.as_tensor(weights[f"beta_{layer}_2"])
                 )
             
             if "gamma_final" in weights:
-                self.final_norm.scale.copy_(torch.as_tensor(weights["gamma_final"]))
+                self.final_norm.weight.copy_(torch.as_tensor(weights["gamma_final"]))
+                self.final_norm.bias.copy_(torch.as_tensor(weights["beta_final"]))
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """
