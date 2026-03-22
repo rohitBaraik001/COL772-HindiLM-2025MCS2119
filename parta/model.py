@@ -3,18 +3,19 @@ import torch.nn as nn
 from typing import Any, Dict, List
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff):
+    def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
 
         self.linear1 = nn.Linear(d_model, d_ff)
         self.gelu = nn.GELU()
+        self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x):
-        return self.linear2(self.gelu(self.linear1(x)))
+        return self.linear2(self.dropout(self.gelu(self.linear1(x))))
     
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, mode = "standard", tau=1.0):
+    def __init__(self, d_model, num_heads, d_ff, mode = "standard", tau=1.0, dropout = 0.1):
         super().__init__()
 
         self.attention = MultiHeadAttention(d_model, num_heads, mode=mode, tau=tau)
@@ -22,16 +23,17 @@ class TransformerBlock(nn.Module):
 
         self.ffn = FeedForward(d_model, d_ff)
         self.norm2 = nn.LayerNorm(d_model)
+        self.dropout    = nn.Dropout(dropout)
 
     def forward(self, x, attention_mask):
         # Implementing feed-forward logic with batching.
         # Attention + residual
         attn_out = self.attention(self.norm1(x), attention_mask)
-        x = x + attn_out
+        x = x + self.dropout(attn_out)
 
         # Feed-forward + residual
         ffn_out = self.ffn(self.norm2(x))
-        x = x + ffn_out
+        x = x + self.dropout(ffn_out)
 
         return x
 
@@ -127,7 +129,7 @@ class LanguageModel(nn.Module):
         mode = config.get("mode", "standard")
         tau = config.get("tau", 1.0)
         self.blocks = nn.ModuleList(
-            [TransformerBlock(d_model, num_heads, d_ff, mode=mode, tau=tau) for _ in range(config["n_layers"])]
+            [TransformerBlock(d_model, num_heads, d_ff, mode=mode, tau=tau, dropout=0.1) for _ in range(config["n_layers"])]
         )
         
         # Final layer norm
