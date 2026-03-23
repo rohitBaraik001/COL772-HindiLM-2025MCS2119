@@ -136,7 +136,7 @@ class LanguageModel(nn.Module):
         vocab_size = config["vocab_size"]
         d_model = config["d_model"]
         num_heads = config["n_heads"]
-        max_seq_len = 512
+        max_seq_len = 256
 
         d_ff = 4 * d_model
         mode = config.get("mode", "standard")

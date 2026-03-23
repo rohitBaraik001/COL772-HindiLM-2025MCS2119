@@ -17,6 +17,8 @@ import torch.nn.functional as F
 import math
 import os
 import json
+import time
+TRAIN_TIME_LIMIT_SECONDS = 6 * 3600 - 600  # 5h 50m (6hr limit - 10min buffer)
 
 def set_seeds_for_training(seed=42):
     random.seed(seed)
@@ -67,8 +69,15 @@ def get_lr_scale(step, warmup_steps, total_steps):
     progress = (step-warmup_steps)/max(1,total_steps-warmup_steps)
     return max(0.1, 0.5*(1.0 + math.cos(math.pi*progress)))
 
+def format_elapsed(seconds):
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02d}h {m:02d}m {s:02d}s"
+
 
 def main(args):
+    set_seeds_for_training(42)
     #raise NotImplementedError("This is a placeholder for the training script. Please implement the training logic here.")
     tokenizer = BPETokenizer()
     tokenizer.load(args.tokenizer_path)
@@ -85,7 +94,6 @@ def main(args):
 
     train_ids = [s for s in train_ids if len(s) > 1]
 
-    #for debuggin purpose remove it later
     print(f"Train Sequence: {len(train_ids)} | Valid Sequence: {len(valid_ids)}")
     # Device
     accelerator_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -139,9 +147,29 @@ def main(args):
     patience = 4
     no_improve_count = 0
 
+    train_start_time = time.time()
+    epoch_durations = []
+    time_limit_reached = False
+
     #training loop
     for epoch in range(num_epochs):
+        epoch_start = time.time()
 
+        # Pre-epoch check: will next epoch fit in remaining budget?
+        elapsed = time.time() - train_start_time
+        remaining = TRAIN_TIME_LIMIT_SECONDS - elapsed
+
+        if remaining <= 0:
+            print(f"\nTime limit reached before epoch {epoch+1}. Stopping.")
+            time_limit_reached = True
+            break
+
+        if len(epoch_durations) > 0:
+            avg_epoch_time = sum(epoch_durations[-3:]) / len(epoch_durations[-3:])
+            if avg_epoch_time > remaining:
+                print(f"\nTime budget: ~{avg_epoch_time:.0f}s needed but only {remaining:.0f}s left. Stopping before epoch {epoch+1}.")
+                time_limit_reached = True
+                break
         #train
         model.train()
         train_loss  = 0.0
@@ -149,13 +177,18 @@ def main(args):
         optimizer.zero_grad()
 
         for batch_idx, batch_sequences in enumerate(create_batches(train_ids, batch_size, shuffle=True)):
+            if time.time() - train_start_time >= TRAIN_TIME_LIMIT_SECONDS:
+                print(f"\nTime limit hit mid-epoch at batch {batch_idx+1}. "
+                      f"Stopping training. Best model already saved.")
+                time_limit_reached = True
+                break
             input_ids, attention_mask = pad_sequences(batch_sequences)
             input_ids = input_ids.to(accelerator_device)
             attention_mask = attention_mask.to(accelerator_device)
 
             with torch.amp.autocast("cuda",enabled=use_amp):
 
-                #Initiating forward pass for batch training
+                # Initiating forward pass for batch training.
                 logits = model(input_ids, attention_mask)
 
                 loss = compute_loss_for_language_modeling(
@@ -181,7 +214,9 @@ def main(args):
 
             train_loss+=loss.item() * accumulation_steps
             num_batches+=1
-
+        
+        if time_limit_reached:
+            break
         train_loss/= num_batches
         #validation
         model.eval()
@@ -228,7 +263,16 @@ def main(args):
         bpc = total_nats/(total_chars*math.log(2))
         current_lr = optimizer.param_groups[0]['lr']
 
-        print(f"Epoch {epoch+1:02d}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | BPC: {bpc:.4f} | LR: {current_lr:.2e}")
+        epoch_duration = time.time() - epoch_start
+        epoch_durations.append(epoch_duration)
+        elapsed_total = time.time() - train_start_time
+
+        print(
+            f"Epoch {epoch+1:02d}/{num_epochs} | Train Loss: {train_loss:.4f} | "
+            f"Val Loss: {val_loss:.4f} | BPC: {bpc:.4f} | LR: {current_lr:.2e} | "
+            f"Epoch Time: {epoch_duration:.1f}s | Elapsed: {format_elapsed(elapsed_total)} | "
+            f"Remaining: {format_elapsed(max(0, TRAIN_TIME_LIMIT_SECONDS - elapsed_total))}"
+        )
 
         # save the best model
         if bpc < best_val_loss:
@@ -245,10 +289,9 @@ def main(args):
                 print(f"\nEarly stopping triggered at epoch {epoch+1}")
                 break
 
-    print(f"\nTraining complete. Best BPC: {best_val_loss:.4f}")
-
-
-
+    total_elapsed = time.time() - train_start_time
+    reason = "time limit" if time_limit_reached else "training complete"
+    print(f"\nStopped ({reason}). Total time: {format_elapsed(total_elapsed)} | Best BPC: {best_val_loss:.4f}")
 
 
 if __name__ == '__main__':
