@@ -124,16 +124,16 @@ def main(args):
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr = 3e-4,
-        betas = (0.9, 0.98),
-        eps = 1e-9,
+        betas = (0.9, 0.95),
+        eps = 1e-8,
         weight_decay = 0.01
     )
 
     scaler = torch.amp.GradScaler("cuda",enabled=use_amp)
-    num_epochs = 100
-    batch_size = 64
-    accumulation_steps = 1
-    warmup_steps = 1000
+    num_epochs = 30
+    batch_size = 128
+    accumulation_steps = 2
+    warmup_steps = 2000
     num_batches_per_epoch = math.ceil(len(train_ids) / batch_size)
     total_steps = num_epochs * num_batches_per_epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -144,7 +144,7 @@ def main(args):
     best_val_loss = float('inf')
     global_step = 0
 
-    patience = 4
+    patience = 10
     no_improve_count = 0
 
     train_start_time = time.time()
