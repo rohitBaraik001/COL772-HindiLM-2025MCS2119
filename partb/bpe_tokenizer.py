@@ -2,7 +2,7 @@ from collections import defaultdict
 import re
 
 class BPETokenizer:
-    def __init__(self, vocab_size=None, special_tokens=None):
+    def __init__(self, vocab_size=4000, special_tokens=None):
         self.vocab_size = vocab_size
 
         if special_tokens is None:
