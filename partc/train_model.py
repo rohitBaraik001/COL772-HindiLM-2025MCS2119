@@ -100,10 +100,10 @@ def main(args):
     use_amp = torch.cuda.is_available()
     print(f"Using Device: {accelerator_device} ! AMP: {use_amp}")
     config = {
-        "d_model":    512,
+        "d_model":    256,
         "n_heads":    8,
-        "d_head":     48,      
-        "n_layers":   8,
+        "d_head":     32,      
+        "n_layers":   6,
         "vocab_size": tokenizer.get_vocab_size(),
         "mode":       "standard",
         "tau":        1.0,
@@ -131,9 +131,9 @@ def main(args):
 
     scaler = torch.amp.GradScaler("cuda",enabled=use_amp)
     num_epochs = 30
-    batch_size = 56
+    batch_size = 48
     accumulation_steps = 2
-    warmup_steps = 2000
+    warmup_steps = 1000
     num_batches_per_epoch = math.ceil(len(train_ids) / batch_size)
     total_steps = num_epochs * num_batches_per_epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(
