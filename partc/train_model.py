@@ -85,7 +85,7 @@ def main(args):
     train_text = load_data(args.train_path)
     valid_text = load_data(args.valid_path)
 
-    MAX_SEQ_LEN = 384
+    MAX_SEQ_LEN = 512
     train_ids = [tokenizer.encode(t.strip())[:MAX_SEQ_LEN] for t in train_text]
     valid_pairs = [(tokenizer.encode(t.strip())[:MAX_SEQ_LEN], t.strip()) for t in valid_text]
     valid_pairs = [(s, t) for s, t in valid_pairs if len(s) > 1]
@@ -100,10 +100,10 @@ def main(args):
     use_amp = torch.cuda.is_available()
     print(f"Using Device: {accelerator_device} ! AMP: {use_amp}")
     config = {
-        "d_model":    384,
+        "d_model":    512,
         "n_heads":    8,
         "d_head":     48,      
-        "n_layers":   6,
+        "n_layers":   8,
         "vocab_size": tokenizer.get_vocab_size(),
         "mode":       "standard",
         "tau":        1.0,
