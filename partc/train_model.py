@@ -144,7 +144,7 @@ def main(args):
     best_val_loss = float('inf')
     global_step = 0
 
-    patience = 10
+    patience = 4
     no_improve_count = 0
 
     train_start_time = time.time()
