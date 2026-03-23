@@ -85,7 +85,7 @@ def main(args):
     train_text = load_data(args.train_path)
     valid_text = load_data(args.valid_path)
 
-    MAX_SEQ_LEN = 384
+    MAX_SEQ_LEN = 256
     train_ids = [tokenizer.encode(t.strip())[:MAX_SEQ_LEN] for t in train_text]
     valid_pairs = [(tokenizer.encode(t.strip())[:MAX_SEQ_LEN], t.strip()) for t in valid_text]
     valid_pairs = [(s, t) for s, t in valid_pairs if len(s) > 1]
@@ -132,7 +132,7 @@ def main(args):
     scaler = torch.amp.GradScaler("cuda",enabled=use_amp)
     num_epochs = 30
     batch_size = 48
-    accumulation_steps = 2
+    accumulation_steps = 1
     warmup_steps = 1000
     num_batches_per_epoch = math.ceil(len(train_ids) / batch_size)
     total_steps = num_epochs * num_batches_per_epoch
